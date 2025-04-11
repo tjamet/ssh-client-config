@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -51,7 +52,7 @@ func UserConfigPath(subFolders ...string) string {
 //
 //	Specifies an alternative per-user configuration file.
 //	If a configuration file is given on the command line, the system-wide configuration file (/etc/ssh/ssh_config) will be ignored.
-//	The default for the per-user configuration file is ~/.ssh/config.  If set to “none”, no configuration files will be read.
+//	The default for the per-user configuration file is ~/.ssh/config.  If set to "none", no configuration files will be read.
 //
 // Configuration items are resolved following the SSH documentation:
 // ssh(1) obtains configuration data from the following sources in the following order:
@@ -268,7 +269,7 @@ func (c SSHClientConfig) identityAgentPath(configs []*sshConfig, host string) (s
 
 		//          This option overrides the SSH_AUTH_SOCK environment variable and can be used to select a specific agent.  Setting the socket name to none disables the use of
 		//          an authentication agent.  If the string "SSH_AUTH_SOCK" is specified, the location of the socket will be read from the SSH_AUTH_SOCK environment variable.
-		//          Otherwise if the specified value begins with a ‘$’ character, then it will be treated as an environment variable containing the location of the socket.
+		//          Otherwise if the specified value begins with a '$' character, then it will be treated as an environment variable containing the location of the socket.
 
 		//          Arguments to IdentityAgent may use the tilde syntax to refer to a user's home directory, the tokens described in the TOKENS section and environment variables
 		//          as described in the ENVIRONMENT VARIABLES section.
@@ -450,6 +451,91 @@ func loadPrivateKeyFromFS(path string) (ssh.Signer, error) {
 	return signer, nil
 }
 
+func (c SSHClientConfig) parseList(configs []*sshConfig, host, key string) []string {
+	for _, cfg := range configs {
+		list, err := cfg.Get(host, key)
+		if err != nil {
+			Log(4, "error getting %s config key from path %s: %v, ignoring", key, cfg.path, err)
+			continue
+		}
+		if list != "" {
+			Log(5, "found %s config from path %s", key, cfg.path)
+			parts := strings.Split(list, ",")
+			result := make([]string, 0, len(parts))
+			for _, p := range parts {
+				if trimmed := strings.TrimSpace(p); trimmed != "" {
+					result = append(result, trimmed)
+				}
+			}
+			return result
+		}
+	}
+	return nil
+}
+
+// handleAlgorithmConfig processes algorithm configuration according to SSH rules:
+// - If list starts with +: append algorithms to current set
+// - If list starts with -: remove algorithms from current set
+// - If list starts with ^: move algorithms to start of current set
+// - Otherwise: replace current set with specified algorithms
+// ref: https://documentation.ubuntu.com/server/explanation/crypto/openssh-crypto-configuration/index.html
+func (c SSHClientConfig) handleAlgorithmConfig(configs []*sshConfig, host, key string, current []string) []string {
+	algos := ""
+	for _, cfg := range configs {
+		value, err := cfg.Get(host, key)
+		value = strings.TrimSpace(value)
+		if err != nil {
+			Log(4, "error getting %s config key from path %s: %v, ignoring", key, cfg.path, err)
+		} else if value != "" {
+			algos = value
+			Log(5, "found %s config from path %s", key, cfg.path)
+			break
+		}
+	}
+
+	if algos == "" {
+		return current
+	}
+
+	storeNewAlgos := func(algos []string) []string {
+		return algos
+	}
+	operation := algos[0]
+	switch operation {
+	case '+':
+		storeNewAlgos = func(algos []string) []string {
+			return append(current, algos...)
+		}
+		algos = algos[1:]
+	case '-':
+		storeNewAlgos = func(algos []string) []string {
+			new := []string{}
+			for _, old := range current {
+				if !slices.Contains(algos, old) {
+					new = append(new, old)
+				}
+			}
+			return new
+		}
+		algos = algos[1:]
+	case '^':
+		storeNewAlgos = func(algos []string) []string {
+			return append(algos, current...)
+		}
+		algos = algos[1:]
+	}
+
+	configuredAlgos := []string{}
+	for _, algo := range strings.Split(algos, ",") {
+		algo = strings.TrimSpace(algo)
+		if algo == "" {
+			continue
+		}
+		configuredAlgos = append(configuredAlgos, algo)
+	}
+	return storeNewAlgos(configuredAlgos)
+}
+
 func (c SSHClientConfig) SSHClientConfig(host string, overrides ...Override) (*ssh.ClientConfig, error) {
 	configs, err := c.configs()
 	if err != nil {
@@ -459,12 +545,18 @@ func (c SSHClientConfig) SSHClientConfig(host string, overrides ...Override) (*s
 	config := &ssh.ClientConfig{
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
 	}
+	config.SetDefaults()
+
+	// Parse ciphers, MACs and key exchanges first
+	config.Ciphers = c.handleAlgorithmConfig(configs, host, "Ciphers", config.Ciphers)
+	config.MACs = c.handleAlgorithmConfig(configs, host, "MACs", config.MACs)
+	config.KeyExchanges = c.handleAlgorithmConfig(configs, host, "KexAlgorithms", config.KeyExchanges)
 
 	for _, cfg := range configs {
 		// RekeyLimit
 		// Specifies the maximum amount of data that may be transmitted before the session key is renegotiated, optionally followed by a maximum amount of time that may
-		// pass before the session key is renegotiated.  The first argument is specified in bytes and may have a suffix of ‘K’, ‘M’, or ‘G’ to indicate Kilobytes,
-		// Megabytes, or Gigabytes, respectively.  The default is between ‘1G’ and ‘4G’, depending on the cipher.  The optional second value is specified in seconds and
+		// pass before the session key is renegotiated.  The first argument is specified in bytes and may have a suffix of 'K', 'M', or 'G' to indicate Kilobytes,
+		// Megabytes, or Gigabytes, respectively.  The default is between '1G' and '4G', depending on the cipher.  The optional second value is specified in seconds and
 		// may use any of the units documented in the TIME FORMATS section of sshd_config(5).  The default value for RekeyLimit is default none, which means that
 		// rekeying is performed after the cipher's default amount of data has been sent or received and no time based rekeying is done.
 		limit, err := cfg.Get(host, "RekeyLimit")
@@ -523,18 +615,14 @@ func (c SSHClientConfig) SSHClientConfig(host string, overrides ...Override) (*s
 			return nil, err
 		}
 
-		// TODO: KeyExchanges, Ciphers, MACs
 		for _, unsupported := range []string{
 			"ForwardAgent",
 			"ProxyCommand",
 			"ProxyJump",
-			"KeyAlgorithms",
 			"PubkeyAcceptedAlgorithms",
 			"PubkeyAuthentication",
 			"HostKeyAlgorithms",
 			"CASignatureAlgorithms",
-			"Ciphers",
-			"MACs",
 			"KnownHostsCommand",
 			"CertificateFile",
 		} {

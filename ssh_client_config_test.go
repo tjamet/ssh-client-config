@@ -773,3 +773,113 @@ func privateKeyType(priv crypto.PrivateKey) string {
 		return ""
 	}
 }
+
+func TestSSHClientConfigWithRemovedAlgorithms(t *testing.T) {
+	t.Setenv("HOME", "/home/user")
+	fs := afero.NewMemMapFs()
+	writeTestFile(t, fs, "/home/user/.ssh/config", `
+Host example.com
+	Ciphers -aes128-ctr,aes192-ctr
+`)
+	withTestFs(t, fs)
+	cfg := NewSSHClientConfig("")
+	configs, err := cfg.configs()
+	require.NoError(t, err)
+
+	assert.Equal(
+		t,
+		[]string{"aes256-ctr", "aes256-gcm@openssh.com"},
+		cfg.handleAlgorithmConfig(configs, "example.com", "Ciphers", []string{"aes128-ctr", "aes256-ctr", "aes192-ctr", "aes256-gcm@openssh.com"}),
+	)
+}
+
+func TestSSHClientConfigWithAddedAlgorithms(t *testing.T) {
+	t.Setenv("HOME", "/home/user")
+	fs := afero.NewMemMapFs()
+	writeTestFile(t, fs, "/home/user/.ssh/config", `
+Host example.com
+	Ciphers +aes128-ctr,aes192-ctr
+`)
+	withTestFs(t, fs)
+	cfg := NewSSHClientConfig("")
+	configs, err := cfg.configs()
+	require.NoError(t, err)
+
+	assert.Equal(
+		t,
+		[]string{"aes256-ctr", "aes256-gcm@openssh.com", "aes128-ctr", "aes192-ctr"},
+		cfg.handleAlgorithmConfig(configs, "example.com", "Ciphers", []string{"aes256-ctr", "aes256-gcm@openssh.com"}),
+	)
+}
+
+func TestSSHClientConfigWithPrependedAlgorithms(t *testing.T) {
+	t.Setenv("HOME", "/home/user")
+	fs := afero.NewMemMapFs()
+	writeTestFile(t, fs, "/home/user/.ssh/config", `
+Host example.com
+	Ciphers ^aes128-ctr,aes192-ctr
+`)
+	withTestFs(t, fs)
+	cfg := NewSSHClientConfig("")
+	configs, err := cfg.configs()
+	require.NoError(t, err)
+
+	assert.Equal(
+		t,
+		[]string{"aes128-ctr", "aes192-ctr", "aes256-ctr", "aes256-gcm@openssh.com"},
+		cfg.handleAlgorithmConfig(configs, "example.com", "Ciphers", []string{"aes256-ctr", "aes256-gcm@openssh.com"}),
+	)
+}
+
+func TestSSHClientConfigWithReplacedAlgorithms(t *testing.T) {
+	t.Setenv("HOME", "/home/user")
+	fs := afero.NewMemMapFs()
+	writeTestFile(t, fs, "/home/user/.ssh/config", `
+Host example.com
+	Ciphers aes128-ctr,aes192-ctr
+`)
+	withTestFs(t, fs)
+	cfg := NewSSHClientConfig("")
+	configs, err := cfg.configs()
+	require.NoError(t, err)
+
+	assert.Equal(
+		t,
+		[]string{"aes128-ctr", "aes192-ctr"},
+		cfg.handleAlgorithmConfig(configs, "example.com", "Ciphers", []string{"aes256-ctr", "aes256-gcm@openssh.com"}),
+	)
+}
+
+func TestSSHClientConfigWithReplacedAlgorithmsAtSystemLevel(t *testing.T) {
+	t.Setenv("HOME", "/home/user")
+	fs := afero.NewMemMapFs()
+	writeTestFile(t, fs, "/etc/ssh/ssh_config", `
+Host *
+	Ciphers aes128-ctr,aes192-ctr
+`)
+	writeTestFile(t, fs, "/home/user/.ssh/config", `
+Host example.com
+	user john-doe
+`)
+	withTestFs(t, fs)
+	cfg := NewSSHClientConfig("")
+	configs, err := cfg.configs()
+	require.NoError(t, err)
+
+	assert.Equal(
+		t,
+		[]string{"aes128-ctr", "aes192-ctr"},
+		cfg.handleAlgorithmConfig(configs, "example.com", "Ciphers", []string{"aes256-ctr", "aes256-gcm@openssh.com"}),
+	)
+}
+
+func TestConfigIsInitialized(t *testing.T) {
+	cfg := NewSSHClientConfig("")
+
+	sshConfig, err := cfg.SSHClientConfig("example.com")
+	require.NoError(t, err)
+
+	assert.NotEmpty(t, sshConfig.Ciphers)
+	assert.NotEmpty(t, sshConfig.MACs)
+	assert.NotEmpty(t, sshConfig.KeyExchanges)
+}
