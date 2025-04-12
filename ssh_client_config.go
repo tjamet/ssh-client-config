@@ -351,14 +351,17 @@ func newPublicKeysCallback(identitiesOnly bool, agentPath string, identityFiles 
 			agentKeys, err := loadAgentKeys(agentPath)
 			if err != nil {
 				Log(2, "error loading agent keys: %v, ignoring", err)
+			} else {
+				Log(5, "loaded agent keys from %s", agentPath)
+				keys = append(keys, agentKeys...)
 			}
-			keys = append(keys, agentKeys...)
 		}
 		for _, path := range identityFiles {
 			key, err := loadPrivateKeyFromFS(path)
 			if err != nil {
 				Log(2, "error loading private key %s: %v, ignoring", path, err)
 			} else if key != nil {
+				Log(5, "loaded private key from %s", path)
 				keys = append(keys, key)
 			}
 		}
