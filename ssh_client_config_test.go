@@ -510,6 +510,25 @@ func TestHostName(t *testing.T) {
 	assert.Equal(t, "other.com", cfg.HostName("other.com"))
 }
 
+func TestHostName_MatchHostBlockApplies(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	writeTestFile(t, fs, "/path/to/ssh/config", "Match host example.com\n\tHostName matched.com\n")
+	withTestFs(t, fs)
+	cfg := SSHClientConfig{LookupPaths: []string{"/path/to/ssh/config"}}
+	assert.Equal(t, "matched.com", cfg.HostName("example.com"))
+	assert.Equal(t, "other.com", cfg.HostName("other.com"))
+}
+
+func TestHostName_MatchExecIsRejected(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	writeTestFile(t, fs, "/path/to/ssh/config", "Match exec \"true\"\n\tHostName matched.com\n")
+	withTestFs(t, fs)
+	cfg := SSHClientConfig{LookupPaths: []string{"/path/to/ssh/config"}}
+	_, err := cfg.configs()
+	assert.Error(t, err)
+	assert.Equal(t, "example.com", cfg.HostName("example.com"))
+}
+
 func TestPort(t *testing.T) {
 	fs := afero.NewMemMapFs()
 	writeTestFile(t, fs, "/path/to/ssh/config", "Host example.com\n\tPort 2222\n")
