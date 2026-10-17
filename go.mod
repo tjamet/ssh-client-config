@@ -1,12 +1,12 @@
 module github.com/tjamet/ssh-client-config
 
-go 1.22.3
+go 1.23.0
 
 require (
 	github.com/kevinburke/ssh_config v1.2.0
 	github.com/spf13/afero v1.11.0
 	github.com/stretchr/testify v1.10.0
-	golang.org/x/crypto v0.33.0
+	golang.org/x/crypto v0.34.0
 	golang.org/x/term v0.29.0
 )
 
