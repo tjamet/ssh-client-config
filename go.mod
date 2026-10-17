@@ -1,6 +1,6 @@
 module github.com/tjamet/ssh-client-config
 
-go 1.26.0
+go 1.27.0
 
 require (
 	github.com/kevinburke/ssh_config v1.2.0
