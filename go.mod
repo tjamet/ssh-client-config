@@ -4,7 +4,7 @@ go 1.27.0
 
 require (
 	github.com/kevinburke/ssh_config v1.6.0
-	github.com/spf13/afero v1.13.0
+	github.com/spf13/afero v1.14.0
 	github.com/stretchr/testify v1.10.0
 	golang.org/x/crypto v0.58.0
 	golang.org/x/term v0.47.0
