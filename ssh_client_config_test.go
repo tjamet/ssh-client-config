@@ -483,6 +483,21 @@ func TestIdentitiesFiles(t *testing.T) {
 		"/home/user/.ssh/id_rsa",
 	}, identities)
 }
+func TestIdentitiesFiles_QuotedValueIsUnquoted(t *testing.T) {
+	t.Setenv("HOME", "/home/user")
+
+	fs := afero.NewMemMapFs()
+	writeTestFile(t, fs, "/path/to/ssh/config", "Host example.com\n\tIdentityFile \"/tmp/my keys/id_rsa\"\n")
+	withTestFs(t, fs)
+	cfg := SSHClientConfig{LookupPaths: []string{"/path/to/ssh/config"}}
+	configs, err := cfg.configs()
+	require.NoError(t, err)
+
+	identities, err := cfg.identityFiles(configs, "example.com")
+	require.NoError(t, err)
+	assert.Equal(t, "/tmp/my keys/id_rsa", identities[0])
+}
+
 func TestHostName_WithoutConfigReturnsOriginalHost(t *testing.T) {
 	withTestFs(t, afero.NewMemMapFs())
 	cfg := SSHClientConfig{

@@ -3,7 +3,7 @@ module github.com/tjamet/ssh-client-config
 go 1.27.0
 
 require (
-	github.com/kevinburke/ssh_config v1.5.0
+	github.com/kevinburke/ssh_config v1.6.0
 	github.com/spf13/afero v1.11.0
 	github.com/stretchr/testify v1.10.0
 	golang.org/x/crypto v0.58.0
