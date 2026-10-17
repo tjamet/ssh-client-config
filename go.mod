@@ -6,7 +6,7 @@ require (
 	github.com/kevinburke/ssh_config v1.2.0
 	github.com/spf13/afero v1.11.0
 	github.com/stretchr/testify v1.10.0
-	golang.org/x/crypto v0.44.0
+	golang.org/x/crypto v0.45.0
 	golang.org/x/term v0.37.0
 )
 
